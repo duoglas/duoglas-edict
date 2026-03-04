@@ -28,6 +28,9 @@ venv/
 node_modules/
 edict/frontend/node_modules/
 
+# Local env
+edict/.env
+
 # Backups
 *.bak*
 data

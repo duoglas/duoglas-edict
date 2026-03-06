@@ -40,6 +40,7 @@ rotate_log() {
 SCAN_INTERVAL="${2:-120}"  # 巡检间隔(秒), 默认 120
 SCAN_COUNTER=0
 SCRIPT_TIMEOUT=30  # 单个脚本最大执行时间(秒)
+ENABLE_TAIZI_20MIN_PING="${ENABLE_TAIZI_20MIN_PING:-0}"
 
 echo "🏛️  三省六部数据刷新循环启动 (PID=$$)"
 echo "   脚本目录: $SCRIPT_DIR"
@@ -73,14 +74,14 @@ while true; do
   safe_run "$SCRIPT_DIR/sync_officials_stats.py"
   safe_run "$SCRIPT_DIR/refresh_live_data.py"
 
-  # 太子通讯督办：确保关键任务每20分钟至少回报一次（写入看板 progress）。
-  # 注意：这里只对少数旗舰任务启用，避免刷屏。
-  python3 "$SCRIPT_DIR/taizi_20min_ping.py" --task JJC-20260305-002 --max-minutes 20 \
-    --now "强制20分钟同步：正在督办RouteA vNext交付与验收" \
-    --plan "收集各部回填🔄|催办未回填项🔄|汇总回奏皇上" >> "$LOG" 2>&1 || true
-  python3 "$SCRIPT_DIR/taizi_20min_ping.py" --task JJC-20260305-003 --max-minutes 20 \
-    --now "强制20分钟同步：正在复盘同步失效根因并落地机制" \
-    --plan "收集事实与时间线🔄|定位根因与对策🔄|落地机制并验收" >> "$LOG" 2>&1 || true
+  if [[ "$ENABLE_TAIZI_20MIN_PING" == "1" ]]; then
+    python3 "$SCRIPT_DIR/taizi_20min_ping.py" --task JJC-20260305-002 --max-minutes 20 \
+      --now "强制20分钟同步：正在督办RouteA vNext交付与验收" \
+      --plan "收集各部回填🔄|催办未回填项🔄|汇总回奏皇上" >> "$LOG" 2>&1 || true
+    python3 "$SCRIPT_DIR/taizi_20min_ping.py" --task JJC-20260305-003 --max-minutes 20 \
+      --now "强制20分钟同步：正在复盘同步失效根因并落地机制" \
+      --plan "收集事实与时间线🔄|定位根因与对策🔄|落地机制并验收" >> "$LOG" 2>&1 || true
+  fi
 
   # 定期巡检：检测卡住的任务并自动重试
   SCAN_COUNTER=$((SCAN_COUNTER + INTERVAL))

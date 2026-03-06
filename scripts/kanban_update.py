@@ -85,6 +85,7 @@ _AGENT_LABELS = {
 }
 
 MAX_PROGRESS_LOG = 100  # 单任务最大进展日志条数
+PROGRESS_DEDUP_WINDOW_SEC = 300
 
 
 def load():
@@ -150,6 +151,50 @@ def _scheduler_mark_heartbeat(task, at=None):
     ts = at or now_iso()
     sched = _ensure_scheduler_meta(task)
     sched["lastHeartbeatAt"] = ts
+
+
+def _parse_iso(ts):
+    if not ts or not isinstance(ts, str):
+        return None
+    try:
+        return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _todos_signature(todos):
+    if not isinstance(todos, list):
+        return "[]"
+    try:
+        return json.dumps(todos, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        return "[]"
+
+
+def _is_duplicate_progress(task, at, agent_id, text, todos):
+    logs = task.get("progress_log") or []
+    if not isinstance(logs, list) or not logs:
+        return False
+    last = logs[-1]
+    if not isinstance(last, dict):
+        return False
+
+    last_at = _parse_iso(last.get("at"))
+    now_at = _parse_iso(at)
+    if not last_at or not now_at:
+        return False
+    if (now_at - last_at).total_seconds() > PROGRESS_DEDUP_WINDOW_SEC:
+        return False
+
+    if str(last.get("agent", "")) != str(agent_id or ""):
+        return False
+    if str(last.get("text", "")) != str(text or ""):
+        return False
+    if _todos_signature(last.get("todos", [])) != _todos_signature(todos):
+        return False
+    if str(last.get("state", "")) != str(task.get("state", "")):
+        return False
+    return True
 
 
 def _scheduler_snapshot(task, at=None, note=""):
@@ -486,6 +531,7 @@ def cmd_progress(task_id, now_text, todos_pipe="", tokens=0, cost=0.0, elapsed=0
 
     done_cnt = [0]
     total_cnt = [0]
+    deduped = [False]
 
     def modifier(tasks):
         t = find_task(tasks, task_id)
@@ -500,6 +546,15 @@ def cmd_progress(task_id, now_text, todos_pipe="", tokens=0, cost=0.0, elapsed=0
         agent_id = _infer_agent_id_from_runtime(t)
         agent_label = _AGENT_LABELS.get(agent_id, agent_id)
         log_todos = parsed_todos if parsed_todos is not None else t.get("todos", [])
+
+        if _is_duplicate_progress(t, at, agent_id, clean, log_todos):
+            _scheduler_mark_heartbeat(t, at=at)
+            deduped[0] = True
+            done_cnt[0] = sum(
+                1 for td in t.get("todos", []) if td.get("status") == "completed"
+            )
+            total_cnt[0] = len(t.get("todos", []))
+            return tasks
 
         log_entry = {
             "at": at,
@@ -532,6 +587,9 @@ def cmd_progress(task_id, now_text, todos_pipe="", tokens=0, cost=0.0, elapsed=0
 
     atomic_json_update(TASKS_FILE, modifier, [])
     save(load())  # trigger refresh
+    if deduped[0]:
+        log.info(f"🔁 {task_id} 重复心跳已去重: {clean[:40]}...")
+        return
     res_info = ""
     if tokens or cost or elapsed:
         res_info = f" [res: {tokens}tok/${cost:.4f}/{elapsed}s]"

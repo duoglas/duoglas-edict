@@ -105,3 +105,45 @@ def test_progress_updates_heartbeat_not_effective_progress(tmp_path):
         assert progress_log[0].get("kind") == "heartbeat"
     finally:
         kb.TASKS_FILE = original
+
+
+def test_progress_dedup_within_window(tmp_path):
+    tasks_file = tmp_path / "tasks_source.json"
+    tasks_file.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "T-4",
+                    "title": "progress dedup test",
+                    "state": "Doing",
+                    "org": "执行中",
+                    "updatedAt": "2026-03-06T00:00:00Z",
+                    "progress_log": [
+                        {
+                            "at": "2026-03-06T01:00:00Z",
+                            "agent": "",
+                            "kind": "heartbeat",
+                            "text": "重复心跳",
+                            "todos": [
+                                {"id": "1", "title": "同步", "status": "in-progress"}
+                            ],
+                            "state": "Doing",
+                            "org": "执行中",
+                        }
+                    ],
+                }
+            ]
+        )
+    )
+
+    original_file = kb.TASKS_FILE
+    original_now_iso = kb.now_iso
+    kb.TASKS_FILE = tasks_file
+    kb.now_iso = lambda: "2026-03-06T01:01:00Z"
+    try:
+        kb.cmd_progress("T-4", "重复心跳", "同步🔄")
+        task = json.loads(tasks_file.read_text())[0]
+        assert len(task.get("progress_log", [])) == 1
+    finally:
+        kb.TASKS_FILE = original_file
+        kb.now_iso = original_now_iso

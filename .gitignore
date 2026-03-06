@@ -27,6 +27,7 @@ venv/
 # Node.js
 node_modules/
 edict/frontend/node_modules/
+edict/frontend/tsconfig.tsbuildinfo
 
 # Local env
 edict/.env
